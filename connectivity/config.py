@@ -9,10 +9,11 @@ class Mode(Enum):
 
 class Config:
 
-    MODE = Mode.CLIENT
+    MODE = Mode.SERVER
     LOCAL_ADDR = '127.0.0.1'
     REMOTE_ADDR = '127.0.0.1'
     BEAT_SECS = 5
+    INACTIVE_SECS = 15
     LOCAL_PORT = 2019
     REMOTE_PORT = 2019
     LOG_LEVEL = 10 # DEBUG

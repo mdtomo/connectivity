@@ -1,11 +1,19 @@
 import socket
 import asyncio
 import logging
+from datetime import datetime
+from collections import deque
 from config import Config, Mode
 
 
 logger = None
 transport = None
+active_clients = deque([])
+
+
+def log_beat(client):
+    global active_clients
+    active_clients.append(client)
 
 
 class UDPServer:
@@ -20,6 +28,7 @@ class UDPServer:
     def datagram_received(self, data, addr):
         msg = data.decode()
         logger.info(f'Received from {addr[0]}:{addr[1]} {msg}')
+        log_beat(tuple([datetime.now(), f'{addr[0]}:{addr[1]}']))
 
     def connection_lost(self, exc):
         if exc is None:
@@ -54,11 +63,7 @@ async def create_server():
 async def beat_sender():
     global transport
     while True:
-        if transport is not None:
-            # Use the already created UDP server socket to send beats.
-            logger.debug('Server sending beat...')
-            transport.sendto('beat'.encode(), (Config.REMOTE_ADDR, Config.REMOTE_PORT))
-        elif transport is None and Config.MODE is Mode.CLIENT:
+        if transport is None and Config.MODE is Mode.CLIENT:
             # Create new connection to send beat to target server.
             loop = asyncio.get_running_loop()
             client_transport, protocol = await loop.create_datagram_endpoint(
@@ -68,13 +73,23 @@ async def beat_sender():
         await asyncio.sleep(Config.BEAT_SECS)
 
 
+async def beat_monitor():
+    global active_clients
+    while True:
+        if len(active_clients) > 0:
+            for client in active_clients:
+                logger.debug(f'Processing {client}') 
+            active_clients.pop()
+        await asyncio.sleep(0.1)
+
+
+
 def setup_logging():
     global logger
     logging.basicConfig(
         format=Config.LOG_FORMAT,
         level=Config.LOG_LEVEL) # logging.DEBUG
     logger = logging.getLogger(__name__)
-
     if Config.SAVE_LOG:
         if not Config.LOG_FILE_PATH.parent.exists():
             Config.LOG_FILE_PATH.parent.mkdir()
@@ -83,6 +98,7 @@ def setup_logging():
         fh.setFormatter(logging.Formatter(Config.LOG_FORMAT))
         fh.setLevel(Config.LOG_LEVEL)
         logger.addHandler(fh)
+    # logger = logging.LoggerAdapter(logger, {'mode': str(Config.MODE)})
 
 
 def main():
@@ -95,6 +111,7 @@ def main():
     elif Config.MODE is Mode.SERVER:
         # Just listen for heart beats.
         tasks.append(loop.create_task(create_server()))
+        tasks.append(loop.create_task(beat_monitor()))
 
     all_tasks = asyncio.gather(*tasks)
     try:

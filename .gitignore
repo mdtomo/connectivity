@@ -1,4 +1,4 @@
-logs/**
+*/logs/**
 Pipfile.lock
 .vscode
 .DS_Store
