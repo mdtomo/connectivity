@@ -1,7 +1,7 @@
 import socket
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 from config import Config, Mode
 
@@ -26,29 +26,32 @@ class Client:
     @property
     def is_active(self):
         time_delta = datetime.now() - self._current_timestamp
-        if time_delta > datetime.timedelta(seconds=Config.INACTIVE_SECS):
+        if time_delta > timedelta(seconds=Config.INACTIVE_SECS):
             return False
         else:
             return True
 
 
 class ClientHandler:
-    _clients = []
+    clients = []
 
     def add(self, new_client):
         existing_client_i = None
-        for i, client in enumerate(ClientHandler._clients):
+        for i, client in enumerate(ClientHandler.clients):
             if client.ip == new_client.ip:
                 client.update_sent_time(new_client.sent_time)
                 existing_client_i = i
                 break
         if existing_client_i is None:
             logger.debug(f'Adding new client {new_client.ip}')
-            ClientHandler._clients.append(new_client)
+            ClientHandler.clients.append(new_client)
+
+    def remove(self, client):
+        ClientHandler.clients.remove(client)
 
     @property
     def count(self):
-        return len(ClientHandler._clients)
+        return len(ClientHandler.clients)
 
 client_handler = ClientHandler()
 
@@ -114,6 +117,10 @@ async def beat_monitor():
     global active_clients
     while True:
         if client_handler.count > 0:
+            for client in client_handler.clients:
+                if not client.is_active:
+                    logger.info(f'Client {client.ip} is no longer active!')
+                    client_handler.remove(client)
             logger.debug(f'active clients {client_handler.count}')
         await asyncio.sleep(1)
 
