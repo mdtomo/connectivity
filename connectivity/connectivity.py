@@ -2,6 +2,7 @@ import socket
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from decimal import Decimal
 from collections import deque
 from config import Config, Mode
 
@@ -66,7 +67,8 @@ class UDPServerProtocol:
 
     def datagram_received(self, data, addr):
         sent_time = data.decode()
-        logger.info(f'Received from {addr[0]}:{addr[1]} {sent_time}')
+        latency = datetime.utcnow() - datetime.utcfromtimestamp(Decimal(sent_time))
+        logger.info(f'Received from {addr[0]}:{addr[1]} {latency.microseconds / 1000}ms')
         client = Client(addr[0], addr[1], sent_time)
         client_handler.add(client)
         #log_beat(tuple([datetime.now(), f'{addr[0]}:{addr[1]}']))
@@ -121,7 +123,7 @@ async def beat_monitor():
                 if not client.is_active:
                     logger.info(f'Client {client.ip} is no longer active!')
                     client_handler.remove(client)
-            logger.debug(f'active clients {client_handler.count}')
+                    logger.debug(f'Active clients {client_handler.count}')
         await asyncio.sleep(1)
 
 
