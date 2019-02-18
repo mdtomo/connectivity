@@ -8,15 +8,51 @@ from config import Config, Mode
 
 logger = None
 transport = None
-active_clients = deque([])
 
 
-def log_beat(client):
-    global active_clients
-    active_clients.append(client)
+class Client:
+    def __init__(self, ip, port, sent_time):
+        self.ip = ip
+        self.port = port
+        self.sent_time = sent_time
+        self._previous_timestamp = datetime.now()
+        self._current_timestamp = datetime.now()
+
+    def update_sent_time(self, sent_time):
+        self.sent_time = sent_time
+        self._previous_timestamp = self._current_timestamp
+        self._current_timestamp = datetime.now()
+
+    @property
+    def is_active(self):
+        time_delta = datetime.now() - self._current_timestamp
+        if time_delta > datetime.timedelta(seconds=Config.INACTIVE_SECS):
+            return False
+        else:
+            return True
 
 
-class UDPServer:
+class ClientHandler:
+    _clients = []
+
+    def add(self, new_client):
+        existing_client_i = None
+        for i, client in enumerate(ClientHandler._clients):
+            if client.ip == new_client.ip:
+                client.update_sent_time(new_client.sent_time)
+                existing_client_i = i
+                break
+        if existing_client_i is None:
+            logger.debug(f'Adding new client {new_client.ip}')
+            ClientHandler._clients.append(new_client)
+
+    @property
+    def count(self):
+        return len(ClientHandler._clients)
+
+client_handler = ClientHandler()
+
+class UDPServerProtocol:
     # https://docs.python.org/3/library/asyncio-protocol.html#asyncio-protocol
     def connection_made(self, transport):
         self.transport = transport
@@ -26,17 +62,18 @@ class UDPServer:
             logger.debug(f'Server listening at {addr[0]}:{addr[1]}')
 
     def datagram_received(self, data, addr):
-        msg = data.decode()
-        logger.info(f'Received from {addr[0]}:{addr[1]} {msg}')
-        log_beat(tuple([datetime.now(), f'{addr[0]}:{addr[1]}']))
+        sent_time = data.decode()
+        logger.info(f'Received from {addr[0]}:{addr[1]} {sent_time}')
+        client = Client(addr[0], addr[1], sent_time)
+        client_handler.add(client)
+        #log_beat(tuple([datetime.now(), f'{addr[0]}:{addr[1]}']))
 
     def connection_lost(self, exc):
         if exc is None:
             logger.debug('Server connection closed.')
 
 
-class UDPClient:
-
+class UDPClientProtocol:
     def connection_made(self, transport):
         self.transport = transport
         sock = transport.get_extra_info('socket')
@@ -44,7 +81,7 @@ class UDPClient:
             laddr = sock.getsockname()
             raddr = sock.getpeername()
             logger.debug(f'Sending beat from {laddr[0]}:{laddr[1]} to {raddr[0]}:{raddr[1]}')
-        transport.sendto('beat'.encode(), (Config.REMOTE_ADDR, Config.REMOTE_PORT))
+        transport.sendto(str(datetime.now().timestamp()).encode(), (Config.REMOTE_ADDR, Config.REMOTE_PORT))
         transport.close()
 
     def connection_lost(self, exc):
@@ -55,7 +92,7 @@ async def create_server():
     global transport
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: UDPServer(),
+        lambda: UDPServerProtocol(),
         local_addr=(Config.LOCAL_ADDR, Config.LOCAL_PORT)
     )
 
@@ -67,7 +104,7 @@ async def beat_sender():
             # Create new connection to send beat to target server.
             loop = asyncio.get_running_loop()
             client_transport, protocol = await loop.create_datagram_endpoint(
-                lambda: UDPClient(),
+                lambda: UDPClientProtocol(),
                 remote_addr=(Config.REMOTE_ADDR, Config.REMOTE_PORT)
     )
         await asyncio.sleep(Config.BEAT_SECS)
@@ -76,12 +113,9 @@ async def beat_sender():
 async def beat_monitor():
     global active_clients
     while True:
-        if len(active_clients) > 0:
-            for client in active_clients:
-                logger.debug(f'Processing {client}') 
-            active_clients.pop()
-        await asyncio.sleep(0.1)
-
+        if client_handler.count > 0:
+            logger.debug(f'active clients {client_handler.count}')
+        await asyncio.sleep(1)
 
 
 def setup_logging():
