@@ -1,14 +1,14 @@
-import socket
 import asyncio
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
-from collections import deque
+import boto3
 from config import Config, Mode
 
 
 logger = None
 transport = None
+sms_client = boto3.client('sns')
 
 
 class Client:
@@ -121,8 +121,15 @@ async def beat_monitor():
         if client_handler.count > 0:
             for client in client_handler.clients:
                 if not client.is_active:
-                    logger.info(f'Client {client.ip} is no longer active!')
+                    logger.info(f'Client {client.ip}:{client.port} is no longer active!')
                     client_handler.remove(client)
+                    if Config.SMS_NOTIFY:
+                        response = sms_client.publish(
+                            PhoneNumber=Config.SMS_NUMBER, 
+                            Subject='Connectivity Notification', 
+                            Message=f'{client.ip}:{client.port} as become INACTIVE. Last response received at {client._current_timestamp.isoformat()}.'
+                            )
+                        logger.info(f'SMS Alert sent! ID: {response["MessageId"]} Status: {response["HTTPStatusCode"]}')
                     logger.debug(f'Active clients {client_handler.count}')
         await asyncio.sleep(1)
 
@@ -131,7 +138,7 @@ def setup_logging():
     global logger
     logging.basicConfig(
         format=Config.LOG_FORMAT,
-        level=Config.LOG_LEVEL) # logging.DEBUG
+        level=Config.LOG_LEVEL)
     logger = logging.getLogger(__name__)
     if Config.SAVE_LOG:
         if not Config.LOG_FILE_PATH.parent.exists():
@@ -141,13 +148,15 @@ def setup_logging():
         fh.setFormatter(logging.Formatter(Config.LOG_FORMAT))
         fh.setLevel(Config.LOG_LEVEL)
         logger.addHandler(fh)
-    # logger = logging.LoggerAdapter(logger, {'mode': str(Config.MODE)})
 
 
 def main():
     setup_logging()
+    if Config.SMS_NOTIFY and Config.SMS_NUMBER == '':
+        logger.warning('SMS notify is enabled but environment variable SMS_NUMBER has not been set!')
     loop = asyncio.get_event_loop()
     tasks = []
+
     if Config.MODE is Mode.CLIENT:
         # Just send heart beats to target
         tasks.append(loop.create_task(beat_sender()))
@@ -157,6 +166,7 @@ def main():
         tasks.append(loop.create_task(beat_monitor()))
 
     all_tasks = asyncio.gather(*tasks)
+
     try:
         loop.run_until_complete(all_tasks)
         loop.run_forever()

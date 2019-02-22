@@ -1,5 +1,6 @@
 from pathlib import Path
 from enum import Enum
+import os
 
 
 class Mode(Enum):
@@ -9,7 +10,7 @@ class Mode(Enum):
 
 class Config:
 
-    MODE = Mode.CLIENT
+    MODE = Mode.SERVER
     LOCAL_ADDR = '127.0.0.1'
     REMOTE_ADDR = '127.0.0.1'
     BEAT_SECS = 5
@@ -20,3 +21,5 @@ class Config:
     LOG_FORMAT = '%(asctime)s: %(levelname)s: %(module)s/%(funcName)s: %(message)s'
     SAVE_LOG = True
     LOG_FILE_PATH = Path.cwd() / 'logs' / 'connectivity_log.log'
+    SMS_NOTIFY = True
+    SMS_NUMBER = os.environ.get('SMS_NUMBER') or ''
